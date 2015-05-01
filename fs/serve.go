@@ -323,8 +323,7 @@ type Server struct {
 func (s *Server) Serve(c *fuse.Conn) error {
 	sc := serveConn{
 		fs:           s.FS,
-		debug:        s.Debug,
-		shouldDebug:  false,
+		debug: s.Debug,
 		dynamicInode: GenerateDynamicInode,
 	}
 	if dyn, ok := sc.fs.(FSInodeGenerator); ok {
@@ -354,9 +353,10 @@ func (s *Server) Serve(c *fuse.Conn) error {
 
 // Serve serves a FUSE connection with the default settings. See
 // Server.Serve.
-func Serve(c *fuse.Conn, fs FS) error {
+func Serve(c *fuse.Conn, fs FS, debug func(msg interface{})) error {
 	server := Server{
 		FS: fs,
+		Debug: debug,
 	}
 	return server.Serve(c)
 }
@@ -373,7 +373,6 @@ type serveConn struct {
 	nodeGen      uint64
 	debug        func(msg interface{})
 	dynamicInode func(parent uint64, name string) uint64
-	shouldDebug  bool
 }
 
 type serveRequest struct {
@@ -635,13 +634,14 @@ func (m *renameNewDirNodeNotFound) String() string {
 	return fmt.Sprintf("In RenameRequest (request %#x), node %d not found", m.Request.Hdr().ID, m.In.NewDir)
 }
 
+func nullLog(resp interface{}) {}
+
 func (c *serveConn) serve(r fuse.Request) {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	//req := &serveRequest{Request: r, cancel: cancel}
 
-	if c.shouldDebug {
+	if c.debug != nil {
 		c.debug(request{
 			Op:      opName(r),
 			Request: r.Hdr(),
@@ -670,6 +670,7 @@ func (c *serveConn) serve(r fuse.Request) {
 				},
 			})
 			r.RespondError(fuse.ESTALE)
+			cancel()
 			return
 		}
 		node = snode.node
@@ -690,8 +691,9 @@ func (c *serveConn) serve(r fuse.Request) {
 	// Call this before responding.
 	// After responding is too late: we might get another request
 	// with the same ID and be very confused.
-	/*
-		done := func(resp interface{}) {
+	done := nullLog
+	if c.debug != nil {
+		done = func(resp interface{}) {
 			msg := response{
 				Op:      opName(r),
 				Request: logResponseHeader{ID: hdr.ID},
@@ -714,18 +716,18 @@ func (c *serveConn) serve(r fuse.Request) {
 			}
 			c.debug(msg)
 
-			c.meta.Lock()
-			delete(c.req, hdr.ID)
-			c.meta.Unlock()
+			//c.meta.Lock()
+			//delete(c.req, hdr.ID)
+			//c.meta.Unlock()
 		}
-	*/
+	}
 
 	switch r := r.(type) {
 	default:
 		// Note: To FUSE, ENOSYS means "this server never implements this request."
 		// It would be inappropriate to return ENOSYS for other operations in this
 		// switch that might only be unavailable in some contexts, not all.
-		//done(fuse.ENOSYS)
+		done(fuse.ENOSYS)
 		r.RespondError(fuse.ENOSYS)
 
 	// FS operations.
@@ -741,7 +743,7 @@ func (c *serveConn) serve(r fuse.Request) {
 				break
 			}
 		}
-		//done(s)
+		done(s)
 		r.Respond(s)
 
 	case *fuse.StatfsRequest:
@@ -753,7 +755,7 @@ func (c *serveConn) serve(r fuse.Request) {
 				break
 			}
 		}
-		//done(s)
+		done(s)
 		r.Respond(s)
 
 	// Node operations.
@@ -1057,6 +1059,7 @@ func (c *serveConn) serve(r fuse.Request) {
 		if shandle == nil {
 			//done(fuse.ESTALE)
 			r.RespondError(fuse.ESTALE)
+			cancel()
 			return
 		}
 		handle := shandle.handle
@@ -1125,6 +1128,7 @@ func (c *serveConn) serve(r fuse.Request) {
 		if shandle == nil {
 			//done(fuse.ESTALE)
 			r.RespondError(fuse.ESTALE)
+			cancel()
 			return
 		}
 
@@ -1147,6 +1151,7 @@ func (c *serveConn) serve(r fuse.Request) {
 		if shandle == nil {
 			//done(fuse.ESTALE)
 			r.RespondError(fuse.ESTALE)
+			cancel()
 			return
 		}
 		handle := shandle.handle
@@ -1166,6 +1171,7 @@ func (c *serveConn) serve(r fuse.Request) {
 		if shandle == nil {
 			//done(fuse.ESTALE)
 			r.RespondError(fuse.ESTALE)
+			cancel()
 			return
 		}
 		handle := shandle.handle
@@ -1284,6 +1290,8 @@ func (c *serveConn) serve(r fuse.Request) {
 				r.RespondError(ENOSYS)
 		*/
 	}
+
+	cancel()
 }
 
 func (c *serveConn) saveLookup(s *fuse.LookupResponse, snode *serveNode, elem string, n2 Node) {
