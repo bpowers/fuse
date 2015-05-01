@@ -38,7 +38,6 @@ package fuse
 import (
 	"fmt"
 	"syscall"
-	"unsafe"
 )
 
 // Version is the FUSE version implemented by the package.
@@ -582,7 +581,7 @@ type initIn struct {
 	Flags        uint32
 }
 
-const initInSize = int(unsafe.Sizeof(initIn{}))
+const initInSize = 4 + 4 + 4 + 4
 
 type initOut struct {
 	outHeader
@@ -620,7 +619,7 @@ type inHeader struct {
 	Padding uint32
 }
 
-const inHeaderSize = int(unsafe.Sizeof(inHeader{}))
+const inHeaderSize = 4 + 4 + 8 + 8 + 4 + 4 + 4 + 4
 
 type outHeader struct {
 	Len    uint32
