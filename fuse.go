@@ -201,6 +201,8 @@ type Header struct {
 	Uid    uint32    // user ID of process making request
 	Gid    uint32    // group ID of process making request
 	Pid    uint32    // process ID of process making request
+
+	start  time.Time
 }
 
 func (h *Header) String() string {
@@ -361,6 +363,8 @@ func ReadHeader(h *Header, buf []byte) error {
 	h.Uid = binary.LittleEndian.Uint32(buf[24:28])
 	h.Gid = binary.LittleEndian.Uint32(buf[28:32])
 	h.Pid = binary.LittleEndian.Uint32(buf[32:36])
+
+	h.start = time.Now()
 	return nil
 }
 
@@ -1174,6 +1178,7 @@ func (r *GetattrRequest) Respond(resp *GetattrResponse) {
 		Attr:          resp.Attr.attr(),
 	}
 	r.respond(&out.outHeader, unsafe.Sizeof(*out))
+	//fmt.Printf("getattr took %s\n", time.Now().Sub(r.start))
 }
 
 // A GetattrResponse is the response to a GetattrRequest.
@@ -1400,6 +1405,7 @@ func (r *OpenRequest) Respond(resp *OpenResponse) {
 		OpenFlags: uint32(resp.Flags),
 	}
 	r.respond(&out.outHeader, unsafe.Sizeof(*out))
+	//fmt.Printf("open took %s\n", time.Now().Sub(r.start))
 }
 
 // A OpenResponse is the response to a OpenRequest.
@@ -1512,6 +1518,7 @@ func (r *ReadRequest) String() string {
 func (r *ReadRequest) Respond(resp *ReadResponse) {
 	out := &outHeader{Unique: uint64(r.ID)}
 	r.respondSafe(out, resp.Data)
+	//fmt.Printf("read took %s\n", time.Now().Sub(r.start))
 }
 
 // A ReadResponse is the response to a ReadRequest.
@@ -1554,6 +1561,7 @@ func (r *ReleaseRequest) String() string {
 func (r *ReleaseRequest) Respond() {
 	out := &outHeader{Unique: uint64(r.ID)}
 	r.respond(out, unsafe.Sizeof(*out))
+	//fmt.Printf("release took %s\n", time.Now().Sub(r.start))
 }
 
 // A DestroyRequest is sent by the kernel when unmounting the file system.
@@ -1839,6 +1847,7 @@ func (r *FlushRequest) String() string {
 func (r *FlushRequest) Respond() {
 	out := &outHeader{Unique: uint64(r.ID)}
 	r.respond(out, unsafe.Sizeof(*out))
+	//fmt.Printf("flush took %s\n", time.Now().Sub(r.start))
 }
 
 // A RemoveRequest asks to remove a file or directory from the
@@ -1907,6 +1916,7 @@ func (r *ReadlinkRequest) String() string {
 func (r *ReadlinkRequest) Respond(target string) {
 	out := &outHeader{Unique: uint64(r.ID)}
 	r.respondSafe(out, []byte(target))
+	//fmt.Printf("readlink took %s\n", time.Now().Sub(r.start))
 }
 
 // A LinkRequest is a request to create a hard link.
