@@ -313,7 +313,8 @@ func (h *Header) RespondError(err error) {
 }
 
 // Maximum file write size we are prepared to receive from the kernel.
-const maxWrite = 16 * 1024 * 1024
+// 31 pages should be enough for anyone.
+const maxWrite = 31 * 4 * 1024
 
 // All requests read from the kernel, without data, are shorter than
 // this.
