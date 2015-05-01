@@ -65,6 +65,10 @@ type getxattrIn struct {
 	getxattrInCommon
 }
 
+var getxattrInSize = getxattrInCommonSize
+
 type setxattrIn struct {
 	setxattrInCommon
 }
+
+var setxattrInSize = setxattrInCommonSize

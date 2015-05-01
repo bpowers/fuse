@@ -102,6 +102,7 @@ package fuse // import "github.com/bpowers/fuse"
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -192,15 +193,14 @@ const RootID NodeID = rootID
 
 // A Header describes the basic information sent in every request.
 type Header struct {
-	Conn *Conn     `json:"-"` // connection this request was received on
-	ID   RequestID // unique ID for request
-	Node NodeID    // file or directory the request is about
-	Uid  uint32    // user ID of process making request
-	Gid  uint32    // group ID of process making request
-	Pid  uint32    // process ID of process making request
-
-	// for returning to reqPool
-	msg *message
+	Conn   *Conn `json:"-"` // connection this request was received on
+	Len    uint32
+	Opcode uint32
+	ID     RequestID // unique ID for request
+	Node   NodeID    // file or directory the request is about
+	Uid    uint32    // user ID of process making request
+	Gid    uint32    // group ID of process making request
+	Pid    uint32    // process ID of process making request
 }
 
 func (h *Header) String() string {
@@ -212,17 +212,17 @@ func (h *Header) Hdr() *Header {
 }
 
 func (h *Header) noResponse() {
-	putMessage(h.msg)
+	//putMessage(h.msg)
 }
 
 func (h *Header) respond(out *outHeader, n uintptr) {
 	h.Conn.respond(out, n)
-	putMessage(h.msg)
+	//putMessage(h.msg)
 }
 
 func (h *Header) respondData(out *outHeader, n uintptr, data []byte) {
 	h.Conn.respondData(out, n, data)
-	putMessage(h.msg)
+	//putMessage(h.msg)
 }
 
 // An ErrorNumber is an error with a specific error number.
@@ -329,65 +329,34 @@ var bufSize = maxRequestSize + maxWrite
 //
 // Messages in the pool are guaranteed to have conn and off zeroed,
 // buf allocated and len==bufSize, and hdr set.
-var reqPool = sync.Pool{
-	New: allocMessage,
+var bufPool = sync.Pool{
+	New: allocBuf,
 }
 
-func allocMessage() interface{} {
-	m := &message{buf: make([]byte, bufSize)}
-	m.hdr = (*inHeader)(unsafe.Pointer(&m.buf[0]))
-	return m
+func allocBuf() interface{} {
+	return make([]byte, bufSize)
 }
 
-func getMessage(c *Conn) *message {
-	m := reqPool.Get().(*message)
-	m.conn = c
-	return m
+func getBuffer() []byte {
+	return bufPool.Get().([]byte)
 }
 
-func putMessage(m *message) {
-	m.buf = m.buf[:bufSize]
-	m.conn = nil
-	m.off = 0
-	reqPool.Put(m)
+func putBuffer(buf []byte) {
+	buf = buf[:bufSize]
+	bufPool.Put(buf)
 }
 
-// a message represents the bytes of a single FUSE message
-type message struct {
-	conn *Conn
-	buf  []byte    // all bytes
-	hdr  *inHeader // header
-	off  int       // offset for reading additional fields
-}
-
-func (m *message) len() uintptr {
-	return uintptr(len(m.buf) - m.off)
-}
-
-func (m *message) data() unsafe.Pointer {
-	var p unsafe.Pointer
-	if m.off < len(m.buf) {
-		p = unsafe.Pointer(&m.buf[m.off])
-	}
-	return p
-}
-
-func (m *message) bytes() []byte {
-	return m.buf[m.off:]
-}
-
-func (m *message) Header() Header {
-	h := m.hdr
-	return Header{
-		Conn: m.conn,
-		ID:   RequestID(h.Unique),
-		Node: NodeID(h.Nodeid),
-		Uid:  h.Uid,
-		Gid:  h.Gid,
-		Pid:  h.Pid,
-
-		msg: m,
-	}
+func ReadHeader(h *Header, buf []byte) error {
+	// FIXME: is it always little endian, or is it the endian-ness
+	// of the current arch?
+	h.Len = binary.LittleEndian.Uint32(buf[0:4])
+	h.Opcode = binary.LittleEndian.Uint32(buf[4:8])
+	h.ID = RequestID(binary.LittleEndian.Uint64(buf[8:16]))
+	h.Node = NodeID(binary.LittleEndian.Uint64(buf[16:24]))
+	h.Uid = binary.LittleEndian.Uint32(buf[24:28])
+	h.Gid = binary.LittleEndian.Uint32(buf[28:32])
+	h.Pid = binary.LittleEndian.Uint32(buf[32:36])
+	return nil
 }
 
 // fileMode returns a Go os.FileMode from a Unix mode.
@@ -455,10 +424,11 @@ func (c *Conn) fd() int {
 // Caller must call either Request.Respond or Request.RespondError in
 // a reasonable time. Caller must not retain Request after that call.
 func (c *Conn) ReadRequest() (Request, error) {
-	m := getMessage(c)
+	buf := getBuffer()
+	defer putBuffer(buf)
 loop:
 	c.rio.RLock()
-	n, err := syscall.Read(c.fd(), m.buf)
+	n, err := syscall.Read(c.fd(), buf)
 	c.rio.RUnlock()
 	if err == syscall.EINTR {
 		// OSXFUSE sends EINTR to userspace when a request interrupt
@@ -466,105 +436,105 @@ loop:
 		goto loop
 	}
 	if err != nil && err != syscall.ENODEV {
-		putMessage(m)
 		return nil, err
 	}
 	if n <= 0 {
-		putMessage(m)
 		return nil, io.EOF
 	}
-	m.buf = m.buf[:n]
+	buf = buf[:n]
 
 	if n < inHeaderSize {
-		putMessage(m)
 		return nil, errors.New("fuse: message too short")
 	}
 
+	hdr := Header{Conn: c}
+	if err := ReadHeader(&hdr, buf[:inHeaderSize]); err != nil {
+		return nil, fmt.Errorf("ReadHeader: %s", err)
+	}
+	buf = buf[inHeaderSize:]
+
 	// FreeBSD FUSE sends a short length in the header
 	// for FUSE_INIT even though the actual read length is correct.
-	if n == inHeaderSize+initInSize && m.hdr.Opcode == opInit && m.hdr.Len < uint32(n) {
-		m.hdr.Len = uint32(n)
+	if hdr.Opcode == opInit && n == inHeaderSize+initInSize && hdr.Len < uint32(n) {
+		hdr.Len = uint32(n)
 	}
 
-	// OSXFUSE sometimes sends the wrong m.hdr.Len in a FUSE_WRITE message.
-	if m.hdr.Len < uint32(n) && m.hdr.Len >= uint32(unsafe.Sizeof(writeIn{})) && m.hdr.Opcode == opWrite {
-		m.hdr.Len = uint32(n)
+	// OSXFUSE sometimes sends the wrong hdr.Len in a FUSE_WRITE message.
+	if hdr.Opcode == opWrite && hdr.Len < uint32(n) && hdr.Len >= writeInSize {
+		hdr.Len = uint32(n)
 	}
 
-	if m.hdr.Len != uint32(n) {
-		// prepare error message before returning m to pool
-		err := fmt.Errorf("fuse: read %d opcode %d but expected %d", n, m.hdr.Opcode, m.hdr.Len)
-		putMessage(m)
-		return nil, err
+	if hdr.Len != uint32(n) {
+		return nil, fmt.Errorf("fuse: read %d opcode %d but expected %d", n, hdr.Opcode, hdr.Len)
 	}
-
-	m.off = inHeaderSize
 
 	// Convert to data structures.
 	// Do not trust kernel to hand us well-formed data.
 	var req Request
-	switch m.hdr.Opcode {
+	switch hdr.Opcode {
 	default:
-		Debug(noOpcode{Opcode: m.hdr.Opcode})
+		Debug(noOpcode{Opcode: hdr.Opcode})
 		goto unrecognized
 
 	case opLookup:
-		buf := m.bytes()
+		buf := buf
 		n := len(buf)
 		if n == 0 || buf[n-1] != '\x00' {
 			goto corrupt
 		}
 		req = &LookupRequest{
-			Header: m.Header(),
+			Header: hdr,
 			Name:   string(buf[:n-1]),
 		}
 
 	case opForget:
-		in := (*forgetIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
+		var in forgetIn
+		if len(buf) < forgetInSize {
 			goto corrupt
 		}
+		in.Nlookup = binary.LittleEndian.Uint64(buf[0:8])
 		req = &ForgetRequest{
-			Header: m.Header(),
+			Header: hdr,
 			N:      in.Nlookup,
 		}
 
 	case opGetattr:
 		req = &GetattrRequest{
-			Header: m.Header(),
+			Header: hdr,
 		}
 
 	case opSetattr:
-		in := (*setattrIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
-			goto corrupt
-		}
-		req = &SetattrRequest{
-			Header:   m.Header(),
-			Valid:    SetattrValid(in.Valid),
-			Handle:   HandleID(in.Fh),
-			Size:     in.Size,
-			Atime:    time.Unix(int64(in.Atime), int64(in.AtimeNsec)),
-			Mtime:    time.Unix(int64(in.Mtime), int64(in.MtimeNsec)),
-			Mode:     fileMode(in.Mode),
-			Uid:      in.Uid,
-			Gid:      in.Gid,
-			Bkuptime: in.BkupTime(),
-			Chgtime:  in.Chgtime(),
-			Flags:    in.Flags(),
-		}
-
+		/*
+			in := (*setattrIn)(m.data())
+			if m.len() < unsafe.Sizeof(*in) {
+				goto corrupt
+			}
+			req = &SetattrRequest{
+				Header:   hdr,
+				Valid:    SetattrValid(in.Valid),
+				Handle:   HandleID(in.Fh),
+				Size:     in.Size,
+				Atime:    time.Unix(int64(in.Atime), int64(in.AtimeNsec)),
+				Mtime:    time.Unix(int64(in.Mtime), int64(in.MtimeNsec)),
+				Mode:     fileMode(in.Mode),
+				Uid:      in.Uid,
+				Gid:      in.Gid,
+				Bkuptime: in.BkupTime(),
+				Chgtime:  in.Chgtime(),
+				Flags:    in.Flags(),
+			}
+		*/
 	case opReadlink:
-		if len(m.bytes()) > 0 {
+		if len(buf) > 0 {
 			goto corrupt
 		}
 		req = &ReadlinkRequest{
-			Header: m.Header(),
+			Header: hdr,
 		}
 
 	case opSymlink:
-		// m.bytes() is "newName\0target\0"
-		names := m.bytes()
+		// buf is "newName\0target\0"
+		names := buf
 		if len(names) == 0 || names[len(names)-1] != 0 {
 			goto corrupt
 		}
@@ -574,156 +544,170 @@ loop:
 		}
 		newName, target := names[0:i], names[i+1:len(names)-1]
 		req = &SymlinkRequest{
-			Header:  m.Header(),
+			Header:  hdr,
 			NewName: string(newName),
 			Target:  string(target),
 		}
 
 	case opLink:
-		in := (*linkIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
+		var in linkIn
+		if len(buf) < linkInSize {
 			goto corrupt
 		}
-		newName := m.bytes()[unsafe.Sizeof(*in):]
-		if len(newName) < 2 || newName[len(newName)-1] != 0 {
+		in.Oldnodeid = binary.LittleEndian.Uint64(buf[0:8])
+		newName := buf[linkInSize:]
+		if len(newName) < 2 || newName[len(newName)-1] != '\x00' {
 			goto corrupt
 		}
-		newName = newName[:len(newName)-1]
 		req = &LinkRequest{
-			Header:  m.Header(),
+			Header:  hdr,
 			OldNode: NodeID(in.Oldnodeid),
-			NewName: string(newName),
+			NewName: string(newName[:len(newName)-1]),
 		}
 
 	case opMknod:
-		in := (*mknodIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
-			goto corrupt
-		}
-		name := m.bytes()[unsafe.Sizeof(*in):]
-		if len(name) < 2 || name[len(name)-1] != '\x00' {
-			goto corrupt
-		}
-		name = name[:len(name)-1]
-		req = &MknodRequest{
-			Header: m.Header(),
-			Mode:   fileMode(in.Mode),
-			Rdev:   in.Rdev,
-			Name:   string(name),
-		}
+		/*
+				in := (*mknodIn)(m.data())
+				if m.len() < unsafe.Sizeof(*in) {
+					goto corrupt
+				}
+				name := buf[unsafe.Sizeof(*in):]
+				if len(name) < 2 || name[len(name)-1] != '\x00' {
+					goto corrupt
+				}
+				name = name[:len(name)-1]
+				req = &MknodRequest{
+					Header: hdr,
+					Mode:   fileMode(in.Mode),
+					Rdev:   in.Rdev,
+					Name:   string(name),
+				}
 
-	case opMkdir:
-		in := (*mkdirIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
-			goto corrupt
-		}
-		name := m.bytes()[unsafe.Sizeof(*in):]
-		i := bytes.IndexByte(name, '\x00')
-		if i < 0 {
-			goto corrupt
-		}
-		req = &MkdirRequest{
-			Header: m.Header(),
-			Name:   string(name[:i]),
-			// observed on Linux: mkdirIn.Mode & syscall.S_IFMT == 0,
-			// and this causes fileMode to go into it's "no idea"
-			// code branch; enforce type to directory
-			Mode: fileMode((in.Mode &^ syscall.S_IFMT) | syscall.S_IFDIR),
-		}
+			case opMkdir:
+				/*
+				in := (*mkdirIn)(m.data())
+				if m.len() < unsafe.Sizeof(*in) {
+					goto corrupt
+				}
+				name := buf[unsafe.Sizeof(*in):]
+				i := bytes.IndexByte(name, '\x00')
+				if i < 0 {
+					goto corrupt
+				}
+				req = &MkdirRequest{
+					Header: hdr,
+					Name:   string(name[:i]),
+					// observed on Linux: mkdirIn.Mode & syscall.S_IFMT == 0,
+					// and this causes fileMode to go into it's "no idea"
+					// code branch; enforce type to directory
+					Mode: fileMode((in.Mode &^ syscall.S_IFMT) | syscall.S_IFDIR),
+				}
+			case opUnlink, opRmdir:
+				buf := buf
+				n := len(buf)
+				if n == 0 || buf[n-1] != '\x00' {
+					goto corrupt
+				}
+				req = &RemoveRequest{
+					Header: hdr,
+					Name:   string(buf[:n-1]),
+					Dir:    hdr.Opcode == opRmdir,
+				}
 
-	case opUnlink, opRmdir:
-		buf := m.bytes()
-		n := len(buf)
-		if n == 0 || buf[n-1] != '\x00' {
-			goto corrupt
-		}
-		req = &RemoveRequest{
-			Header: m.Header(),
-			Name:   string(buf[:n-1]),
-			Dir:    m.hdr.Opcode == opRmdir,
-		}
+			case opRename:
+				in := (*renameIn)(m.data())
+				if m.len() < unsafe.Sizeof(*in) {
+					goto corrupt
+				}
+				newDirNodeID := NodeID(in.Newdir)
+				oldNew := buf[unsafe.Sizeof(*in):]
+				// oldNew should be "old\x00new\x00"
+				if len(oldNew) < 4 {
+					goto corrupt
+				}
+				if oldNew[len(oldNew)-1] != '\x00' {
+					goto corrupt
+				}
+				i := bytes.IndexByte(oldNew, '\x00')
+				if i < 0 {
+					goto corrupt
+				}
+				oldName, newName := string(oldNew[:i]), string(oldNew[i+1:len(oldNew)-1])
+				req = &RenameRequest{
+					Header:  hdr,
+					NewDir:  newDirNodeID,
+					OldName: oldName,
+					NewName: newName,
+				}
 
-	case opRename:
-		in := (*renameIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
-			goto corrupt
-		}
-		newDirNodeID := NodeID(in.Newdir)
-		oldNew := m.bytes()[unsafe.Sizeof(*in):]
-		// oldNew should be "old\x00new\x00"
-		if len(oldNew) < 4 {
-			goto corrupt
-		}
-		if oldNew[len(oldNew)-1] != '\x00' {
-			goto corrupt
-		}
-		i := bytes.IndexByte(oldNew, '\x00')
-		if i < 0 {
-			goto corrupt
-		}
-		oldName, newName := string(oldNew[:i]), string(oldNew[i+1:len(oldNew)-1])
-		req = &RenameRequest{
-			Header:  m.Header(),
-			NewDir:  newDirNodeID,
-			OldName: oldName,
-			NewName: newName,
-		}
-
+		*/
 	case opOpendir, opOpen:
-		in := (*openIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
+		var in openIn
+		if len(buf) < openInSize {
 			goto corrupt
 		}
+		in.Flags = binary.LittleEndian.Uint32(buf[0:4])
 		req = &OpenRequest{
-			Header: m.Header(),
-			Dir:    m.hdr.Opcode == opOpendir,
+			Header: hdr,
+			Dir:    hdr.Opcode == opOpendir,
 			Flags:  openFlags(in.Flags),
 		}
 
 	case opRead, opReaddir:
-		in := (*readIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
+		var in readIn
+		if len(buf) < readInSize {
 			goto corrupt
 		}
+		r := bytes.NewReader(buf)
+		binary.Read(r, binary.LittleEndian, &in.Fh)
+		binary.Read(r, binary.LittleEndian, &in.Offset)
+		binary.Read(r, binary.LittleEndian, &in.Size)
+		binary.Read(r, binary.LittleEndian, &in.Padding)
 		req = &ReadRequest{
-			Header: m.Header(),
-			Dir:    m.hdr.Opcode == opReaddir,
+			Header: hdr,
+			Dir:    hdr.Opcode == opReaddir,
 			Handle: HandleID(in.Fh),
 			Offset: int64(in.Offset),
 			Size:   int(in.Size),
 		}
 
 	case opWrite:
-		in := (*writeIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
-			goto corrupt
-		}
-		r := &WriteRequest{
-			Header: m.Header(),
-			Handle: HandleID(in.Fh),
-			Offset: int64(in.Offset),
-			Flags:  WriteFlags(in.WriteFlags),
-		}
-		buf := m.bytes()[unsafe.Sizeof(*in):]
-		if uint32(len(buf)) < in.Size {
-			goto corrupt
-		}
-		r.Data = buf
-		req = r
-
+		/*
+			in := (*writeIn)(m.data())
+			if m.len() < unsafe.Sizeof(*in) {
+				goto corrupt
+			}
+			r := &WriteRequest{
+				Header: hdr,
+				Handle: HandleID(in.Fh),
+				Offset: int64(in.Offset),
+				Flags:  WriteFlags(in.WriteFlags),
+			}
+			buf := buf[unsafe.Sizeof(*in):]
+			if uint32(len(buf)) < in.Size {
+				goto corrupt
+			}
+			r.Data = buf
+			req = r
+		*/
 	case opStatfs:
 		req = &StatfsRequest{
-			Header: m.Header(),
+			Header: hdr,
 		}
 
 	case opRelease, opReleasedir:
-		in := (*releaseIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
+		var in releaseIn
+		if len(buf) < releaseInSize {
 			goto corrupt
 		}
+		r := bytes.NewReader(buf)
+		binary.Read(r, binary.LittleEndian, &in.Fh)
+		binary.Read(r, binary.LittleEndian, &in.Flags)
+		binary.Read(r, binary.LittleEndian, &in.ReleaseFlags)
+		binary.Read(r, binary.LittleEndian, &in.LockOwner)
 		req = &ReleaseRequest{
-			Header:       m.Header(),
-			Dir:          m.hdr.Opcode == opReleasedir,
+			Header:       hdr,
+			Dir:          hdr.Opcode == opReleasedir,
 			Handle:       HandleID(in.Fh),
 			Flags:        openFlags(in.Flags),
 			ReleaseFlags: ReleaseFlags(in.ReleaseFlags),
@@ -731,99 +715,116 @@ loop:
 		}
 
 	case opFsync, opFsyncdir:
-		in := (*fsyncIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
-			goto corrupt
-		}
-		req = &FsyncRequest{
-			Dir:    m.hdr.Opcode == opFsyncdir,
-			Header: m.Header(),
-			Handle: HandleID(in.Fh),
-			Flags:  in.FsyncFlags,
-		}
+		/*
+				in := (*fsyncIn)(m.data())
+				if m.len() < unsafe.Sizeof(*in) {
+					goto corrupt
+				}
+				req = &FsyncRequest{
+					Dir:    hdr.Opcode == opFsyncdir,
+					Header: hdr,
+					Handle: HandleID(in.Fh),
+					Flags:  in.FsyncFlags,
+				}
 
-	case opSetxattr:
-		in := (*setxattrIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
-			goto corrupt
-		}
-		m.off += int(unsafe.Sizeof(*in))
-		name := m.bytes()
-		i := bytes.IndexByte(name, '\x00')
-		if i < 0 {
-			goto corrupt
-		}
-		xattr := name[i+1:]
-		if uint32(len(xattr)) < in.Size {
-			goto corrupt
-		}
-		xattr = xattr[:in.Size]
-		req = &SetxattrRequest{
-			Header:   m.Header(),
-			Flags:    in.Flags,
-			Position: in.position(),
-			Name:     string(name[:i]),
-			Xattr:    xattr,
-		}
-
+			case opSetxattr:
+				in := (*setxattrIn)(m.data())
+				if m.len() < unsafe.Sizeof(*in) {
+					goto corrupt
+				}
+				m.off += int(unsafe.Sizeof(*in))
+				name := buf
+				i := bytes.IndexByte(name, '\x00')
+				if i < 0 {
+					goto corrupt
+				}
+				xattr := name[i+1:]
+				if uint32(len(xattr)) < in.Size {
+					goto corrupt
+				}
+				xattr = xattr[:in.Size]
+				req = &SetxattrRequest{
+					Header:   hdr,
+					Flags:    in.Flags,
+					Position: in.position(),
+					Name:     string(name[:i]),
+					Xattr:    xattr,
+				}
+		*/
 	case opGetxattr:
-		in := (*getxattrIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
+		var in getxattrIn
+		if len(buf) < getxattrInSize {
 			goto corrupt
 		}
-		name := m.bytes()[unsafe.Sizeof(*in):]
+		r := bytes.NewReader(buf)
+		binary.Read(r, binary.LittleEndian, &in.Size)
+		binary.Read(r, binary.LittleEndian, &in.Padding)
+		name := buf[getxattrInSize:]
 		i := bytes.IndexByte(name, '\x00')
 		if i < 0 {
 			goto corrupt
 		}
 		req = &GetxattrRequest{
-			Header:   m.Header(),
+			Header:   hdr,
 			Name:     string(name[:i]),
 			Size:     in.Size,
 			Position: in.position(),
 		}
 
 	case opListxattr:
-		in := (*getxattrIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
+		var in getxattrIn
+		if len(buf) < getxattrInSize {
 			goto corrupt
 		}
+		r := bytes.NewReader(buf)
+		binary.Read(r, binary.LittleEndian, &in.Size)
+		binary.Read(r, binary.LittleEndian, &in.Padding)
 		req = &ListxattrRequest{
-			Header:   m.Header(),
+			Header:   hdr,
 			Size:     in.Size,
 			Position: in.position(),
 		}
 
 	case opRemovexattr:
-		buf := m.bytes()
+		buf := buf
 		n := len(buf)
 		if n == 0 || buf[n-1] != '\x00' {
 			goto corrupt
 		}
 		req = &RemovexattrRequest{
-			Header: m.Header(),
+			Header: hdr,
 			Name:   string(buf[:n-1]),
 		}
 
 	case opFlush:
-		in := (*flushIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
+		var in flushIn
+		if len(buf) < flushInSize {
 			goto corrupt
 		}
+		r := bytes.NewReader(buf)
+		binary.Read(r, binary.LittleEndian, &in.Fh)
+		binary.Read(r, binary.LittleEndian, &in.FlushFlags)
+		binary.Read(r, binary.LittleEndian, &in.Padding)
+		binary.Read(r, binary.LittleEndian, &in.LockOwner)
 		req = &FlushRequest{
-			Header:    m.Header(),
+			Header:    hdr,
 			Handle:    HandleID(in.Fh),
 			Flags:     in.FlushFlags,
 			LockOwner: in.LockOwner,
 		}
 
 	case opInit:
-		in := (*initIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
+		var in initIn
+		if len(buf) < initInSize {
 			goto corrupt
 		}
+		r := bytes.NewReader(buf)
+		binary.Read(r, binary.LittleEndian, &in.Major)
+		binary.Read(r, binary.LittleEndian, &in.Minor)
+		binary.Read(r, binary.LittleEndian, &in.MaxReadahead)
+		binary.Read(r, binary.LittleEndian, &in.Flags)
 		req = &InitRequest{
-			Header:       m.Header(),
+			Header:       hdr,
 			Major:        in.Major,
 			Minor:        in.Minor,
 			MaxReadahead: in.MaxReadahead,
@@ -838,48 +839,53 @@ loop:
 		panic("opSetlkw")
 
 	case opAccess:
-		in := (*accessIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
+		var in accessIn
+		if len(buf) < accessInSize {
 			goto corrupt
 		}
+		in.Mask = binary.LittleEndian.Uint32(buf[0:4])
 		req = &AccessRequest{
-			Header: m.Header(),
+			Header: hdr,
 			Mask:   in.Mask,
 		}
 
 	case opCreate:
-		in := (*createIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
-			goto corrupt
-		}
-		name := m.bytes()[unsafe.Sizeof(*in):]
-		i := bytes.IndexByte(name, '\x00')
-		if i < 0 {
-			goto corrupt
-		}
-		req = &CreateRequest{
-			Header: m.Header(),
-			Flags:  openFlags(in.Flags),
-			Mode:   fileMode(in.Mode),
-			Name:   string(name[:i]),
-		}
+		/*
+			in := (*createIn)(m.data())
+			if m.len() < unsafe.Sizeof(*in) {
+				goto corrupt
+			}
+			name := buf[unsafe.Sizeof(*in):]
+			i := bytes.IndexByte(name, '\x00')
+			if i < 0 {
+				goto corrupt
+			}
+			req = &CreateRequest{
+				Header: hdr,
+				Flags:  openFlags(in.Flags),
+				Mode:   fileMode(in.Mode),
+				Name:   string(name[:i]),
+			}
+		*/
 
 	case opInterrupt:
-		in := (*interruptIn)(m.data())
-		if m.len() < unsafe.Sizeof(*in) {
-			goto corrupt
-		}
-		req = &InterruptRequest{
-			Header: m.Header(),
-			IntrID: RequestID(in.Unique),
-		}
+		/*
+			in := (*interruptIn)(m.data())
+			if m.len() < unsafe.Sizeof(*in) {
+				goto corrupt
+			}
+			req = &InterruptRequest{
+				Header: hdr,
+				IntrID: RequestID(in.Unique),
+			}
+		*/
 
 	case opBmap:
 		panic("opBmap")
 
 	case opDestroy:
 		req = &DestroyRequest{
-			Header: m.Header(),
+			Header: hdr,
 		}
 
 	// OS X
@@ -895,14 +901,14 @@ loop:
 
 corrupt:
 	Debug(malformedMessage{})
-	putMessage(m)
 	return nil, fmt.Errorf("fuse: malformed message")
 
 unrecognized:
 	// Unrecognized message.
 	// Assume higher-level code will send a "no idea what you mean" error.
-	h := m.Header()
-	return &h, nil
+	h := new(Header)
+	*h = hdr
+	return h, nil
 }
 
 type bugShortKernelWrite struct {

@@ -381,6 +381,8 @@ type forgetIn struct {
 	Nlookup uint64
 }
 
+const forgetInSize = 8
+
 type attrOut struct {
 	outHeader
 	AttrValid     uint64 // Cache timeout for the attributes
@@ -426,6 +428,8 @@ type linkIn struct {
 	Oldnodeid uint64
 }
 
+const linkInSize = 8
+
 type setattrInCommon struct {
 	Valid     uint32
 	Padding   uint32
@@ -445,10 +449,14 @@ type setattrInCommon struct {
 	Unused5   uint32
 }
 
+const setattrInCommonSize = 4 + 4 + 8 + 8 + 8 + 8 + 8 + 8 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4
+
 type openIn struct {
 	Flags  uint32
 	Unused uint32
 }
+
+const openInSize = 4 + 4
 
 type openOut struct {
 	outHeader
@@ -485,12 +493,16 @@ type releaseIn struct {
 	LockOwner    uint32
 }
 
+const releaseInSize = 8 + 4 + 4 + 4
+
 type flushIn struct {
 	Fh         uint64
 	FlushFlags uint32
 	Padding    uint32
 	LockOwner  uint64
 }
+
+const flushInSize = 8 + 4 + 4 + 8
 
 type readIn struct {
 	Fh      uint64
@@ -499,12 +511,16 @@ type readIn struct {
 	Padding uint32
 }
 
+const readInSize = 8 + 8 + 4 + 4
+
 type writeIn struct {
 	Fh         uint64
 	Offset     uint64
 	Size       uint32
 	WriteFlags uint32
 }
+
+const writeInSize = uint32(8 + 8 + 4 + 4)
 
 type writeOut struct {
 	outHeader
@@ -539,6 +555,8 @@ type setxattrInCommon struct {
 	Flags uint32
 }
 
+const setxattrInCommonSize = 4 + 4
+
 func (setxattrInCommon) position() uint32 {
 	return 0
 }
@@ -547,6 +565,8 @@ type getxattrInCommon struct {
 	Size    uint32
 	Padding uint32
 }
+
+const getxattrInCommonSize = 4 + 4
 
 func (getxattrInCommon) position() uint32 {
 	return 0
@@ -573,6 +593,8 @@ type accessIn struct {
 	Mask    uint32
 	Padding uint32
 }
+
+const accessInSize = 4 + 4
 
 type initIn struct {
 	Major        uint32
@@ -608,17 +630,15 @@ type bmapOut struct {
 	Block uint64
 }
 
-type inHeader struct {
-	Len     uint32
-	Opcode  uint32
-	Unique  uint64
-	Nodeid  uint64
-	Uid     uint32
-	Gid     uint32
-	Pid     uint32
-	Padding uint32
-}
-
+// the header the kernel sends to us is:
+// len    uint32
+// opcode uint32
+// unique uint64
+// nodeid uint64
+// uid    uint32
+// gid    uint32
+// pid    uint32
+// pad    uint32
 const inHeaderSize = 4 + 4 + 8 + 8 + 4 + 4 + 4 + 4
 
 type outHeader struct {
