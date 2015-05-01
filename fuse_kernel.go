@@ -647,6 +647,8 @@ type outHeader struct {
 	Unique uint64
 }
 
+const outHeaderSize = 4 + 4 + 8
+
 type dirent struct {
 	Ino     uint64
 	Off     uint64
