@@ -225,6 +225,11 @@ func (h *Header) respondData(out *outHeader, n uintptr, data []byte) {
 	//putMessage(h.msg)
 }
 
+func (h *Header) respondSafe(out *outHeader, data []byte) {
+	h.Conn.respondSafe(out, data)
+	//putMessage(h.msg)
+}
+
 // An ErrorNumber is an error with a specific error number.
 //
 // Operations may return an error value that implements ErrorNumber to
@@ -465,7 +470,7 @@ loop:
 	}
 
 	if hdr.Len != uint32(n) {
-		return nil, fmt.Errorf("fuse: bad hdr len")//read %d opcode %d but expected %d", n, hdr.Opcode, hdr.Len)
+		return nil, fmt.Errorf("fuse: bad hdr len") //read %d opcode %d but expected %d", n, hdr.Opcode, hdr.Len)
 	}
 
 	// Convert to data structures.
@@ -947,6 +952,13 @@ func (c *Conn) respondData(out *outHeader, n uintptr, data []byte) {
 	copy(msg, (*[1 << 30]byte)(unsafe.Pointer(out))[:n])
 	copy(msg[n:], data)
 	syscall.Write(c.fd(), msg)
+}
+
+func (c *Conn) respondSafe(out *outHeader, data []byte) {
+	out.Len = uint32(outHeaderSize + len(data))
+	c.wio.Lock()
+	writev(c.fd(), [][]byte{(*[1 << 30]byte)(unsafe.Pointer(out))[:outHeaderSize], data})
+	c.wio.Unlock()
 }
 
 // An InitRequest is the first request sent on a FUSE file system.
@@ -1485,7 +1497,7 @@ func (r *ReadRequest) String() string {
 // Respond replies to the request with the given response.
 func (r *ReadRequest) Respond(resp *ReadResponse) {
 	out := &outHeader{Unique: uint64(r.ID)}
-	r.respondData(out, unsafe.Sizeof(*out), resp.Data)
+	r.respondSafe(out, resp.Data)
 }
 
 // A ReadResponse is the response to a ReadRequest.
@@ -1880,7 +1892,7 @@ func (r *ReadlinkRequest) String() string {
 
 func (r *ReadlinkRequest) Respond(target string) {
 	out := &outHeader{Unique: uint64(r.ID)}
-	r.respondData(out, unsafe.Sizeof(*out), []byte(target))
+	r.respondSafe(out, []byte(target))
 }
 
 // A LinkRequest is a request to create a hard link.

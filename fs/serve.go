@@ -675,15 +675,15 @@ func (c *serveConn) serve(r fuse.Request) {
 		node = snode.node
 	}
 	/*
-	if c.req[hdr.ID] != nil {
-		// This happens with OSXFUSE.  Assume it's okay and
-		// that we'll never see an interrupt for this one.
-		// Otherwise everything wedges.  TODO: Report to OSXFUSE?
-		//
-		// TODO this might have been because of missing done() calls
-	} else {
-		c.req[hdr.ID] = req
-	}
+		if c.req[hdr.ID] != nil {
+			// This happens with OSXFUSE.  Assume it's okay and
+			// that we'll never see an interrupt for this one.
+			// Otherwise everything wedges.  TODO: Report to OSXFUSE?
+			//
+			// TODO this might have been because of missing done() calls
+		} else {
+			c.req[hdr.ID] = req
+		}
 	*/
 	c.meta.Unlock()
 
@@ -691,33 +691,33 @@ func (c *serveConn) serve(r fuse.Request) {
 	// After responding is too late: we might get another request
 	// with the same ID and be very confused.
 	/*
-	done := func(resp interface{}) {
-		msg := response{
-			Op:      opName(r),
-			Request: logResponseHeader{ID: hdr.ID},
-		}
-		if err, ok := resp.(error); ok {
-			msg.Error = err.Error()
-			if ferr, ok := err.(fuse.ErrorNumber); ok {
-				errno := ferr.Errno()
-				msg.Errno = errno.ErrnoName()
-				if errno == err {
-					// it's just a fuse.Errno with no extra detail;
-					// skip the textual message for log readability
-					msg.Error = ""
+		done := func(resp interface{}) {
+			msg := response{
+				Op:      opName(r),
+				Request: logResponseHeader{ID: hdr.ID},
+			}
+			if err, ok := resp.(error); ok {
+				msg.Error = err.Error()
+				if ferr, ok := err.(fuse.ErrorNumber); ok {
+					errno := ferr.Errno()
+					msg.Errno = errno.ErrnoName()
+					if errno == err {
+						// it's just a fuse.Errno with no extra detail;
+						// skip the textual message for log readability
+						msg.Error = ""
+					}
+				} else {
+					msg.Errno = fuse.DefaultErrno.ErrnoName()
 				}
 			} else {
-				msg.Errno = fuse.DefaultErrno.ErrnoName()
+				msg.Out = resp
 			}
-		} else {
-			msg.Out = resp
-		}
-		c.debug(msg)
+			c.debug(msg)
 
-		c.meta.Lock()
-		delete(c.req, hdr.ID)
-		c.meta.Unlock()
-	}
+			c.meta.Lock()
+			delete(c.req, hdr.ID)
+			c.meta.Unlock()
+		}
 	*/
 
 	switch r := r.(type) {
@@ -1258,11 +1258,11 @@ func (c *serveConn) serve(r fuse.Request) {
 	case *fuse.InterruptRequest:
 		c.meta.Lock()
 		/*
-		ireq := c.req[r.IntrID]
-		if ireq != nil && ireq.cancel != nil {
-			ireq.cancel()
-			ireq.cancel = nil
-		}*/
+			ireq := c.req[r.IntrID]
+			if ireq != nil && ireq.cancel != nil {
+				ireq.cancel()
+				ireq.cancel = nil
+			}*/
 		c.meta.Unlock()
 		//done(nil)
 		r.Respond()
