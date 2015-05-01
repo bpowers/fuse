@@ -37,6 +37,8 @@ type setattrIn struct {
 	setattrInCommon
 }
 
+const setattrInSize = setattrInCommonSize
+
 func (in *setattrIn) BkupTime() time.Time {
 	return time.Time{}
 }
@@ -65,10 +67,10 @@ type getxattrIn struct {
 	getxattrInCommon
 }
 
-var getxattrInSize = getxattrInCommonSize
+const getxattrInSize = getxattrInCommonSize
 
 type setxattrIn struct {
 	setxattrInCommon
 }
 
-var setxattrInSize = setxattrInCommonSize
+const setxattrInSize = setxattrInCommonSize

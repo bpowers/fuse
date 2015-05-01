@@ -406,16 +406,22 @@ type mknodIn struct {
 	// "filename\x00" follows.
 }
 
+const mknodInSize = 4 + 4
+
 type mkdirIn struct {
 	Mode    uint32
 	Padding uint32
 	// filename follows
 }
 
+const mkdirInSize = 4 + 4
+
 type renameIn struct {
 	Newdir uint64
 	// "oldname\x00newname\x00" follows
 }
+
+const renameInSize = 8
 
 // OS X
 type exchangeIn struct {

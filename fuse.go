@@ -509,26 +509,40 @@ loop:
 		}
 
 	case opSetattr:
-		/*
-			in := (*setattrIn)(m.data())
-			if m.len() < unsafe.Sizeof(*in) {
-				goto corrupt
-			}
-			req = &SetattrRequest{
-				Header:   hdr,
-				Valid:    SetattrValid(in.Valid),
-				Handle:   HandleID(in.Fh),
-				Size:     in.Size,
-				Atime:    time.Unix(int64(in.Atime), int64(in.AtimeNsec)),
-				Mtime:    time.Unix(int64(in.Mtime), int64(in.MtimeNsec)),
-				Mode:     fileMode(in.Mode),
-				Uid:      in.Uid,
-				Gid:      in.Gid,
-				Bkuptime: in.BkupTime(),
-				Chgtime:  in.Chgtime(),
-				Flags:    in.Flags(),
-			}
-		*/
+		var in setattrIn
+		if len(buf) < setattrInSize {
+			goto corrupt
+		}
+		in.Valid = binary.LittleEndian.Uint32(buf[0:4])
+		in.Padding = binary.LittleEndian.Uint32(buf[4:8])
+		in.Fh = binary.LittleEndian.Uint64(buf[8:16])
+		in.Size = binary.LittleEndian.Uint64(buf[16:24])
+		in.LockOwner = binary.LittleEndian.Uint64(buf[24:32])
+		in.Atime = binary.LittleEndian.Uint64(buf[32:40])
+		in.Mtime = binary.LittleEndian.Uint64(buf[40:48])
+		in.Unused2 = binary.LittleEndian.Uint64(buf[48:56])
+		in.AtimeNsec = binary.LittleEndian.Uint32(buf[56:60])
+		in.MtimeNsec = binary.LittleEndian.Uint32(buf[60:64])
+		in.Unused3 = binary.LittleEndian.Uint32(buf[64:68])
+		in.Mode = binary.LittleEndian.Uint32(buf[68:72])
+		in.Unused4 = binary.LittleEndian.Uint32(buf[72:76])
+		in.Uid = binary.LittleEndian.Uint32(buf[76:80])
+		in.Gid = binary.LittleEndian.Uint32(buf[80:84])
+		in.Unused5 = binary.LittleEndian.Uint32(buf[84:88])
+		req = &SetattrRequest{
+			Header:   hdr,
+			Valid:    SetattrValid(in.Valid),
+			Handle:   HandleID(in.Fh),
+			Size:     in.Size,
+			Atime:    time.Unix(int64(in.Atime), int64(in.AtimeNsec)),
+			Mtime:    time.Unix(int64(in.Mtime), int64(in.MtimeNsec)),
+			Mode:     fileMode(in.Mode),
+			Uid:      in.Uid,
+			Gid:      in.Gid,
+			Bkuptime: in.BkupTime(),
+			Chgtime:  in.Chgtime(),
+			Flags:    in.Flags(),
+		}
 	case opReadlink:
 		if len(buf) > 0 {
 			goto corrupt
@@ -571,81 +585,79 @@ loop:
 		}
 
 	case opMknod:
-		/*
-				in := (*mknodIn)(m.data())
-				if m.len() < unsafe.Sizeof(*in) {
-					goto corrupt
-				}
-				name := buf[unsafe.Sizeof(*in):]
-				if len(name) < 2 || name[len(name)-1] != '\x00' {
-					goto corrupt
-				}
-				name = name[:len(name)-1]
-				req = &MknodRequest{
-					Header: hdr,
-					Mode:   fileMode(in.Mode),
-					Rdev:   in.Rdev,
-					Name:   string(name),
-				}
+		var in mknodIn
+		if len(buf) < mknodInSize {
+			goto corrupt
+		}
+		in.Mode = binary.LittleEndian.Uint32(buf[0:4])
+		in.Rdev = binary.LittleEndian.Uint32(buf[4:8])
+		name := buf[mknodInSize:]
+		if len(name) < 2 || name[len(name)-1] != '\x00' {
+			goto corrupt
+		}
+		req = &MknodRequest{
+			Header: hdr,
+			Mode:   fileMode(in.Mode),
+			Rdev:   in.Rdev,
+			Name:   string(name),
+		}
 
-			case opMkdir:
-				/*
-				in := (*mkdirIn)(m.data())
-				if m.len() < unsafe.Sizeof(*in) {
-					goto corrupt
-				}
-				name := buf[unsafe.Sizeof(*in):]
-				i := bytes.IndexByte(name, '\x00')
-				if i < 0 {
-					goto corrupt
-				}
-				req = &MkdirRequest{
-					Header: hdr,
-					Name:   string(name[:i]),
-					// observed on Linux: mkdirIn.Mode & syscall.S_IFMT == 0,
-					// and this causes fileMode to go into it's "no idea"
-					// code branch; enforce type to directory
-					Mode: fileMode((in.Mode &^ syscall.S_IFMT) | syscall.S_IFDIR),
-				}
-			case opUnlink, opRmdir:
-				buf := buf
-				n := len(buf)
-				if n == 0 || buf[n-1] != '\x00' {
-					goto corrupt
-				}
-				req = &RemoveRequest{
-					Header: hdr,
-					Name:   string(buf[:n-1]),
-					Dir:    hdr.Opcode == opRmdir,
-				}
+	case opMkdir:
+		var in mkdirIn
+		if len(buf) < mkdirInSize {
+			goto corrupt
+		}
+		in.Mode = binary.LittleEndian.Uint32(buf[0:4])
+		in.Padding = binary.LittleEndian.Uint32(buf[4:8])
+		name := buf[mkdirInSize:]
+		i := bytes.IndexByte(name, '\x00')
+		if i < 0 {
+			goto corrupt
+		}
+		req = &MkdirRequest{
+			Header: hdr,
+			Name:   string(name[:i]),
+			// observed on Linux: mkdirIn.Mode & syscall.S_IFMT == 0,
+			// and this causes fileMode to go into it's "no idea"
+			// code branch; enforce type to directory
+			Mode: fileMode((in.Mode &^ syscall.S_IFMT) | syscall.S_IFDIR),
+		}
+	case opUnlink, opRmdir:
+		buf := buf
+		n := len(buf)
+		if n == 0 || buf[n-1] != '\x00' {
+			goto corrupt
+		}
+		req = &RemoveRequest{
+			Header: hdr,
+			Name:   string(buf[:n-1]),
+			Dir:    hdr.Opcode == opRmdir,
+		}
 
-			case opRename:
-				in := (*renameIn)(m.data())
-				if m.len() < unsafe.Sizeof(*in) {
-					goto corrupt
-				}
-				newDirNodeID := NodeID(in.Newdir)
-				oldNew := buf[unsafe.Sizeof(*in):]
-				// oldNew should be "old\x00new\x00"
-				if len(oldNew) < 4 {
-					goto corrupt
-				}
-				if oldNew[len(oldNew)-1] != '\x00' {
-					goto corrupt
-				}
-				i := bytes.IndexByte(oldNew, '\x00')
-				if i < 0 {
-					goto corrupt
-				}
-				oldName, newName := string(oldNew[:i]), string(oldNew[i+1:len(oldNew)-1])
-				req = &RenameRequest{
-					Header:  hdr,
-					NewDir:  newDirNodeID,
-					OldName: oldName,
-					NewName: newName,
-				}
+	case opRename:
+		var in renameIn
+		if len(buf) < renameInSize {
+			goto corrupt
+		}
+		in.Newdir = binary.LittleEndian.Uint64(buf[0:8])
+		newDirNodeID := NodeID(in.Newdir)
+		// buf is "old\0new\0"
+		names := buf[renameInSize:]
+		if len(names) == 0 || names[len(names)-1] != 0 {
+			goto corrupt
+		}
+		i := bytes.IndexByte(names, '\x00')
+		if i < 0 {
+			goto corrupt
+		}
+		oldName, newName := names[0:i], names[i+1:len(names)-1]
+		req = &RenameRequest{
+			Header:  hdr,
+			NewDir:  newDirNodeID,
+			OldName: string(oldName),
+			NewName: string(newName),
+		}
 
-		*/
 	case opOpendir, opOpen:
 		var in openIn
 		if len(buf) < openInSize {
