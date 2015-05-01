@@ -1,12 +1,12 @@
 seqdiag {
   app;
-  fuse [label="bazil.org/fuse"];
+  fuse [label="github.com/bpowers/fuse"];
   fusermount;
   kernel;
   mounts;
 
   app;
-  fuse [label="bazil.org/fuse"];
+  fuse [label="github.com/bpowers/fuse"];
   fusermount;
   kernel;
   mounts;

@@ -7,9 +7,9 @@ import (
 	"path"
 	"testing"
 
-	"bazil.org/fuse"
-	"bazil.org/fuse/fs"
-	"bazil.org/fuse/fs/fstestutil"
+	"github.com/bpowers/fuse"
+	"github.com/bpowers/fuse/fs"
+	"github.com/bpowers/fuse/fs/fstestutil"
 	"golang.org/x/net/context"
 )
 

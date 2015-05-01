@@ -1,6 +1,6 @@
-# bazil.org/fuse documentation
+# github.com/bpowers/fuse documentation
 
-See also API docs at http://godoc.org/bazil.org/fuse
+See also API docs at http://godoc.org/github.com/bpowers/fuse
 
 - [The mount sequence](mount-sequence.md)
 - [Writing documentation](writing-docs.md)
