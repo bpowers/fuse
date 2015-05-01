@@ -449,7 +449,7 @@ loop:
 
 	hdr := Header{Conn: c}
 	if err := ReadHeader(&hdr, buf[:inHeaderSize]); err != nil {
-		return nil, fmt.Errorf("ReadHeader: %s", err)
+		return nil, fmt.Errorf("ReadHeader")
 	}
 	buf = buf[inHeaderSize:]
 
@@ -465,7 +465,7 @@ loop:
 	}
 
 	if hdr.Len != uint32(n) {
-		return nil, fmt.Errorf("fuse: read %d opcode %d but expected %d", n, hdr.Opcode, hdr.Len)
+		return nil, fmt.Errorf("fuse: bad hdr len")//read %d opcode %d but expected %d", n, hdr.Opcode, hdr.Len)
 	}
 
 	// Convert to data structures.
@@ -473,7 +473,7 @@ loop:
 	var req Request
 	switch hdr.Opcode {
 	default:
-		Debug(noOpcode{Opcode: hdr.Opcode})
+		//Debug(noOpcode{Opcode: hdr.Opcode})
 		goto unrecognized
 
 	case opLookup:
@@ -658,11 +658,10 @@ loop:
 		if len(buf) < readInSize {
 			goto corrupt
 		}
-		r := bytes.NewReader(buf)
-		binary.Read(r, binary.LittleEndian, &in.Fh)
-		binary.Read(r, binary.LittleEndian, &in.Offset)
-		binary.Read(r, binary.LittleEndian, &in.Size)
-		binary.Read(r, binary.LittleEndian, &in.Padding)
+		in.Fh = binary.LittleEndian.Uint64(buf[0:8])
+		in.Offset = binary.LittleEndian.Uint64(buf[8:16])
+		in.Size = binary.LittleEndian.Uint32(buf[16:20])
+		in.Padding = binary.LittleEndian.Uint32(buf[20:24])
 		req = &ReadRequest{
 			Header: hdr,
 			Dir:    hdr.Opcode == opReaddir,
@@ -700,11 +699,10 @@ loop:
 		if len(buf) < releaseInSize {
 			goto corrupt
 		}
-		r := bytes.NewReader(buf)
-		binary.Read(r, binary.LittleEndian, &in.Fh)
-		binary.Read(r, binary.LittleEndian, &in.Flags)
-		binary.Read(r, binary.LittleEndian, &in.ReleaseFlags)
-		binary.Read(r, binary.LittleEndian, &in.LockOwner)
+		in.Fh = binary.LittleEndian.Uint64(buf[0:8])
+		in.Flags = binary.LittleEndian.Uint32(buf[8:12])
+		in.ReleaseFlags = binary.LittleEndian.Uint32(buf[12:16])
+		in.LockOwner = binary.LittleEndian.Uint32(buf[16:20])
 		req = &ReleaseRequest{
 			Header:       hdr,
 			Dir:          hdr.Opcode == opReleasedir,
@@ -756,9 +754,7 @@ loop:
 		if len(buf) < getxattrInSize {
 			goto corrupt
 		}
-		r := bytes.NewReader(buf)
-		binary.Read(r, binary.LittleEndian, &in.Size)
-		binary.Read(r, binary.LittleEndian, &in.Padding)
+		in.Size = binary.LittleEndian.Uint32(buf[0:4])
 		name := buf[getxattrInSize:]
 		i := bytes.IndexByte(name, '\x00')
 		if i < 0 {
@@ -776,9 +772,7 @@ loop:
 		if len(buf) < getxattrInSize {
 			goto corrupt
 		}
-		r := bytes.NewReader(buf)
-		binary.Read(r, binary.LittleEndian, &in.Size)
-		binary.Read(r, binary.LittleEndian, &in.Padding)
+		in.Size = binary.LittleEndian.Uint32(buf[0:4])
 		req = &ListxattrRequest{
 			Header:   hdr,
 			Size:     in.Size,
@@ -801,11 +795,10 @@ loop:
 		if len(buf) < flushInSize {
 			goto corrupt
 		}
-		r := bytes.NewReader(buf)
-		binary.Read(r, binary.LittleEndian, &in.Fh)
-		binary.Read(r, binary.LittleEndian, &in.FlushFlags)
-		binary.Read(r, binary.LittleEndian, &in.Padding)
-		binary.Read(r, binary.LittleEndian, &in.LockOwner)
+		in.Fh = binary.LittleEndian.Uint64(buf[0:8])
+		in.FlushFlags = binary.LittleEndian.Uint32(buf[8:12])
+		in.Padding = binary.LittleEndian.Uint32(buf[12:16])
+		in.LockOwner = binary.LittleEndian.Uint64(buf[16:24])
 		req = &FlushRequest{
 			Header:    hdr,
 			Handle:    HandleID(in.Fh),
@@ -818,11 +811,10 @@ loop:
 		if len(buf) < initInSize {
 			goto corrupt
 		}
-		r := bytes.NewReader(buf)
-		binary.Read(r, binary.LittleEndian, &in.Major)
-		binary.Read(r, binary.LittleEndian, &in.Minor)
-		binary.Read(r, binary.LittleEndian, &in.MaxReadahead)
-		binary.Read(r, binary.LittleEndian, &in.Flags)
+		in.Major = binary.LittleEndian.Uint32(buf[0:4])
+		in.Minor = binary.LittleEndian.Uint32(buf[4:8])
+		in.MaxReadahead = binary.LittleEndian.Uint32(buf[8:12])
+		in.Flags = binary.LittleEndian.Uint32(buf[12:16])
 		req = &InitRequest{
 			Header:       hdr,
 			Major:        in.Major,

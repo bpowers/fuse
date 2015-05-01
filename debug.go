@@ -11,6 +11,8 @@ func stack() string {
 
 func nop(msg interface{}) {}
 
+var Nop = nop
+
 // Debug is called to output debug messages, including protocol
 // traces. The default behavior is to do nothing.
 //
