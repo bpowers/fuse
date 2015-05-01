@@ -476,6 +476,8 @@ type createIn struct {
 	Mode  uint32
 }
 
+const createInSize = 4 + 4
+
 type createOut struct {
 	outHeader
 
@@ -556,6 +558,8 @@ type fsyncIn struct {
 	Padding    uint32
 }
 
+const fsyncInSize = 8 + 4 + 4
+
 type setxattrInCommon struct {
 	Size  uint32
 	Flags uint32
@@ -624,6 +628,8 @@ type initOut struct {
 type interruptIn struct {
 	Unique uint64
 }
+
+const interruptInSize = 8
 
 type bmapIn struct {
 	Block     uint64

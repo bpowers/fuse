@@ -730,42 +730,45 @@ loop:
 		}
 
 	case opFsync, opFsyncdir:
-		/*
-				in := (*fsyncIn)(m.data())
-				if m.len() < unsafe.Sizeof(*in) {
-					goto corrupt
-				}
-				req = &FsyncRequest{
-					Dir:    hdr.Opcode == opFsyncdir,
-					Header: hdr,
-					Handle: HandleID(in.Fh),
-					Flags:  in.FsyncFlags,
-				}
+		var in fsyncIn
+		if len(buf) < fsyncInSize {
+			goto corrupt
+		}
+		in.Fh = binary.LittleEndian.Uint64(buf[0:8])
+		in.FsyncFlags = binary.LittleEndian.Uint32(buf[8:12])
+		in.Padding = binary.LittleEndian.Uint32(buf[12:16])
+		req = &FsyncRequest{
+			Dir:    hdr.Opcode == opFsyncdir,
+			Header: hdr,
+			Handle: HandleID(in.Fh),
+			Flags:  in.FsyncFlags,
+		}
 
-			case opSetxattr:
-				in := (*setxattrIn)(m.data())
-				if m.len() < unsafe.Sizeof(*in) {
-					goto corrupt
-				}
-				m.off += int(unsafe.Sizeof(*in))
-				name := buf
-				i := bytes.IndexByte(name, '\x00')
-				if i < 0 {
-					goto corrupt
-				}
-				xattr := name[i+1:]
-				if uint32(len(xattr)) < in.Size {
-					goto corrupt
-				}
-				xattr = xattr[:in.Size]
-				req = &SetxattrRequest{
-					Header:   hdr,
-					Flags:    in.Flags,
-					Position: in.position(),
-					Name:     string(name[:i]),
-					Xattr:    xattr,
-				}
-		*/
+	case opSetxattr:
+		var in setxattrIn
+		if len(buf) < setxattrInSize {
+			goto corrupt
+		}
+		in.Size = binary.LittleEndian.Uint32(buf[0:4])
+		in.Flags = binary.LittleEndian.Uint32(buf[4:8])
+		name := buf[setxattrInSize:]
+		i := bytes.IndexByte(name, '\x00')
+		if i < 0 {
+			goto corrupt
+		}
+		xattr := name[i+1:]
+		if uint32(len(xattr)) < in.Size {
+			goto corrupt
+		}
+		xattr = xattr[:in.Size]
+		req = &SetxattrRequest{
+			Header:   hdr,
+			Flags:    in.Flags,
+			Position: in.position(),
+			Name:     string(name[:i]),
+			Xattr:    xattr,
+		}
+
 	case opGetxattr:
 		var in getxattrIn
 		if len(buf) < getxattrInSize {
@@ -859,35 +862,34 @@ loop:
 		}
 
 	case opCreate:
-		/*
-			in := (*createIn)(m.data())
-			if m.len() < unsafe.Sizeof(*in) {
-				goto corrupt
-			}
-			name := buf[unsafe.Sizeof(*in):]
-			i := bytes.IndexByte(name, '\x00')
-			if i < 0 {
-				goto corrupt
-			}
-			req = &CreateRequest{
-				Header: hdr,
-				Flags:  openFlags(in.Flags),
-				Mode:   fileMode(in.Mode),
-				Name:   string(name[:i]),
-			}
-		*/
+		var in createIn
+		if len(buf) < createInSize {
+			goto corrupt
+		}
+		in.Flags = binary.LittleEndian.Uint32(buf[0:4])
+		in.Mode = binary.LittleEndian.Uint32(buf[4:8])
+		name := buf[createInSize:]
+		i := bytes.IndexByte(name, '\x00')
+		if i < 0 {
+			goto corrupt
+		}
+		req = &CreateRequest{
+			Header: hdr,
+			Flags:  openFlags(in.Flags),
+			Mode:   fileMode(in.Mode),
+			Name:   string(name[:i]),
+		}
 
 	case opInterrupt:
-		/*
-			in := (*interruptIn)(m.data())
-			if m.len() < unsafe.Sizeof(*in) {
-				goto corrupt
-			}
-			req = &InterruptRequest{
-				Header: hdr,
-				IntrID: RequestID(in.Unique),
-			}
-		*/
+		var in interruptIn
+		if len(buf) < interruptInSize {
+			goto corrupt
+		}
+		in.Unique = binary.LittleEndian.Uint64(buf[0:8])
+		req = &InterruptRequest{
+			Header: hdr,
+			IntrID: RequestID(in.Unique),
+		}
 
 	case opBmap:
 		panic("opBmap")
