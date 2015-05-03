@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/context"
@@ -413,8 +414,20 @@ func (sn *serveNode) attr() (attr fuse.Attr) {
 
 type serveHandle struct {
 	handle   Handle
-	readData []byte
+	d atomic.Value // []byte
 	nodeID   fuse.NodeID
+}
+
+func (sh *serveHandle) readData() []byte {
+	data := sh.d.Load()
+	if data == nil || data.([]byte) == nil {
+		return nil
+	}
+	return data.([]byte)
+}
+
+func (sh *serveHandle) setReadData(data []byte) {
+	sh.d.Store(data)
 }
 
 // NodeRef can be embedded in a Node to recognize the same Node being
@@ -1091,31 +1104,33 @@ func (c *serveConn) serve(r fuse.Request) {
 		s := &fuse.ReadResponse{Data: respBuf}
 		if r.Dir {
 			if h, ok := handle.(HandleReadDirAller); ok {
-				if shandle.readData == nil {
+				data := shandle.readData()
+				if data == nil {
 					dirs, err := h.ReadDirAll(ctx)
 					if err != nil {
 						done(err)
 						r.RespondError(err)
 						break
 					}
-					var data []byte
 					for _, dir := range dirs {
 						if dir.Inode == 0 {
 							dir.Inode = c.dynamicInode(snode.inode, dir.Name)
 						}
 						data = fuse.AppendDirent(data, dir)
 					}
-					shandle.readData = data
+					shandle.setReadData(data)
 				}
-				fuseutil.HandleRead(r, s, shandle.readData)
+				fuseutil.HandleRead(r, s, data)
 				done(s)
 				r.Respond(s)
 				break
 			}
 		} else {
 			if h, ok := handle.(HandleReadAller); ok {
-				if shandle.readData == nil {
-					data, err := h.ReadAll(ctx)
+				data := shandle.readData()
+				if data == nil {
+					var err error
+					data, err = h.ReadAll(ctx)
 					if err != nil {
 						done(err)
 						r.RespondError(err)
@@ -1124,9 +1139,9 @@ func (c *serveConn) serve(r fuse.Request) {
 					if data == nil {
 						data = []byte{}
 					}
-					shandle.readData = data
+					shandle.setReadData(data)
 				}
-				fuseutil.HandleRead(r, s, shandle.readData)
+				fuseutil.HandleRead(r, s, data)
 				done(s)
 				r.Respond(s)
 				break
