@@ -1084,6 +1084,7 @@ func (c *serveConn) serve(r fuse.Request) {
 		var respBuf []byte
 		if r.Size == 4096 {
 			respBuf = getPageBuffer()
+			defer putPageBuffer(respBuf)
 		} else {
 			respBuf = make([]byte, 0, r.Size)
 		}
@@ -1146,7 +1147,6 @@ func (c *serveConn) serve(r fuse.Request) {
 		done(s)
 		r.Respond(s)
 		s.Data = nil
-		putPageBuffer(respBuf)
 
 	case *fuse.WriteRequest:
 		shandle := c.getHandle(r.Handle)
