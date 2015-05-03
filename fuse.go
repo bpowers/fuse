@@ -202,7 +202,7 @@ type Header struct {
 	Gid    uint32    // group ID of process making request
 	Pid    uint32    // process ID of process making request
 
-	start  time.Time
+	start time.Time
 }
 
 func (h *Header) String() string {
@@ -708,7 +708,7 @@ loop:
 			Header: hdr,
 			Handle: HandleID(in.Fh),
 			Offset: int64(in.Offset),
-			Data: buf,
+			Data:   buf,
 			Flags:  WriteFlags(in.WriteFlags),
 		}
 
