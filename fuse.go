@@ -692,24 +692,26 @@ loop:
 		}
 
 	case opWrite:
-		/*
-			in := (*writeIn)(m.data())
-			if m.len() < unsafe.Sizeof(*in) {
-				goto corrupt
-			}
-			r := &WriteRequest{
-				Header: hdr,
-				Handle: HandleID(in.Fh),
-				Offset: int64(in.Offset),
-				Flags:  WriteFlags(in.WriteFlags),
-			}
-			buf := buf[unsafe.Sizeof(*in):]
-			if uint32(len(buf)) < in.Size {
-				goto corrupt
-			}
-			r.Data = buf
-			req = r
-		*/
+		var in writeIn
+		if len(buf) < writeInSize {
+			goto corrupt
+		}
+		in.Fh = binary.LittleEndian.Uint64(buf[0:8])
+		in.Offset = binary.LittleEndian.Uint64(buf[8:16])
+		in.Size = binary.LittleEndian.Uint32(buf[16:20])
+		in.WriteFlags = binary.LittleEndian.Uint32(buf[20:24])
+		buf = buf[writeInSize:]
+		if uint32(len(buf)) < in.Size {
+			goto corrupt
+		}
+		req = &WriteRequest{
+			Header: hdr,
+			Handle: HandleID(in.Fh),
+			Offset: int64(in.Offset),
+			Data: buf,
+			Flags:  WriteFlags(in.WriteFlags),
+		}
+
 	case opStatfs:
 		req = &StatfsRequest{
 			Header: hdr,

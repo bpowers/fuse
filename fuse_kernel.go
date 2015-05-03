@@ -528,7 +528,7 @@ type writeIn struct {
 	WriteFlags uint32
 }
 
-const writeInSize = uint32(8 + 8 + 4 + 4)
+const writeInSize = 8 + 8 + 4 + 4
 
 type writeOut struct {
 	outHeader
