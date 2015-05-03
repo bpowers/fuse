@@ -1917,7 +1917,7 @@ func (r *ReadlinkRequest) String() string {
 
 func (r *ReadlinkRequest) Respond(target string) {
 	out := &outHeader{Unique: uint64(r.ID)}
-	r.respondSafe(out, []byte(target))
+	r.respondData(out, unsafe.Sizeof(*out), []byte(target))
 	//fmt.Printf("readlink took %s\n", time.Now().Sub(r.start))
 }
 

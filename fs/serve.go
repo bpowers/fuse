@@ -25,6 +25,23 @@ const (
 	entryValidTime = 1 * time.Minute
 )
 
+var pageBufPool = sync.Pool{
+	New: allocPageBuf,
+}
+
+func allocPageBuf() interface{} {
+	return make([]byte, 4096)
+}
+
+func getPageBuffer() []byte {
+	return pageBufPool.Get().([]byte)
+}
+
+func putPageBuffer(buf []byte) {
+	buf = buf[:4096]
+	pageBufPool.Put(buf)
+}
+
 // TODO: FINISH DOCS
 
 // An FS is the interface required of a file system.
@@ -637,7 +654,7 @@ func (m *renameNewDirNodeNotFound) String() string {
 func nullLog(resp interface{}) {}
 
 func (c *serveConn) serve(r fuse.Request) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx := context.Background()//cancel := context.WithCancel(context.Background())
 
 	//req := &serveRequest{Request: r, cancel: cancel}
 
@@ -670,7 +687,7 @@ func (c *serveConn) serve(r fuse.Request) {
 				},
 			})
 			r.RespondError(fuse.ESTALE)
-			cancel()
+			//cancel()
 			return
 		}
 		node = snode.node
@@ -1059,12 +1076,18 @@ func (c *serveConn) serve(r fuse.Request) {
 		if shandle == nil {
 			done(fuse.ESTALE)
 			r.RespondError(fuse.ESTALE)
-			cancel()
+			//cancel()
 			return
 		}
 		handle := shandle.handle
 
-		s := &fuse.ReadResponse{Data: make([]byte, 0, r.Size)}
+		var respBuf []byte
+		if r.Size == 4096 {
+			respBuf = getPageBuffer()
+		} else {
+			respBuf = make([]byte, 0, r.Size)
+		}
+		s := &fuse.ReadResponse{Data: respBuf}
 		if r.Dir {
 			if h, ok := handle.(HandleReadDirAller); ok {
 				if shandle.readData == nil {
@@ -1122,13 +1145,15 @@ func (c *serveConn) serve(r fuse.Request) {
 		}
 		done(s)
 		r.Respond(s)
+		s.Data = nil
+		putPageBuffer(respBuf)
 
 	case *fuse.WriteRequest:
 		shandle := c.getHandle(r.Handle)
 		if shandle == nil {
 			done(fuse.ESTALE)
 			r.RespondError(fuse.ESTALE)
-			cancel()
+			//cancel()
 			return
 		}
 
@@ -1151,7 +1176,7 @@ func (c *serveConn) serve(r fuse.Request) {
 		if shandle == nil {
 			done(fuse.ESTALE)
 			r.RespondError(fuse.ESTALE)
-			cancel()
+			//cancel()
 			return
 		}
 		handle := shandle.handle
@@ -1171,7 +1196,7 @@ func (c *serveConn) serve(r fuse.Request) {
 		if shandle == nil {
 			done(fuse.ESTALE)
 			r.RespondError(fuse.ESTALE)
-			cancel()
+			//cancel()
 			return
 		}
 		handle := shandle.handle
@@ -1266,7 +1291,7 @@ func (c *serveConn) serve(r fuse.Request) {
 		/*
 			ireq := c.req[r.IntrID]
 			if ireq != nil && ireq.cancel != nil {
-				ireq.cancel()
+				ireq.//cancel()
 				ireq.cancel = nil
 			}*/
 		c.meta.Unlock()
@@ -1291,7 +1316,7 @@ func (c *serveConn) serve(r fuse.Request) {
 		*/
 	}
 
-	cancel()
+	//cancel()
 }
 
 func (c *serveConn) saveLookup(s *fuse.LookupResponse, snode *serveNode, elem string, n2 Node) {
