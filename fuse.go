@@ -1519,7 +1519,7 @@ func (r *ReadRequest) String() string {
 // Respond replies to the request with the given response.
 func (r *ReadRequest) Respond(resp *ReadResponse) {
 	out := &outHeader{Unique: uint64(r.ID)}
-	r.respondSafe(out, resp.Data)
+	r.respondData(out, unsafe.Sizeof(*out), resp.Data)
 	//fmt.Printf("read took %s\n", time.Now().Sub(r.start))
 }
 
