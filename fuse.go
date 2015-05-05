@@ -227,11 +227,6 @@ func (h *Header) respondData(out *outHeader, n uintptr, data []byte) {
 	//putMessage(h.msg)
 }
 
-func (h *Header) respondSafe(out *outHeader, data []byte) {
-	h.Conn.respondSafe(out, data)
-	//putMessage(h.msg)
-}
-
 // An ErrorNumber is an error with a specific error number.
 //
 // Operations may return an error value that implements ErrorNumber to
