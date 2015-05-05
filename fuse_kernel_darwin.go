@@ -45,6 +45,8 @@ type setattrIn struct {
 	Flags_       uint32 // see chflags(2)
 }
 
+const setattrInSize = setattrInCommonSize + 8 + 8 + 8 + 4 + 4 + 4 + 4
+
 func (in *setattrIn) BkupTime() time.Time {
 	return time.Unix(int64(in.Bkuptime_), int64(in.BkuptimeNsec))
 }
