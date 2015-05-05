@@ -974,13 +974,6 @@ func (c *Conn) respondData(out *outHeader, n uintptr, data []byte) {
 	syscall.Write(c.fd(), msg)
 }
 
-func (c *Conn) respondSafe(out *outHeader, data []byte) {
-	out.Len = uint32(outHeaderSize + len(data))
-	c.wio.Lock()
-	writev(c.fd(), [][]byte{(*[1 << 30]byte)(unsafe.Pointer(out))[:outHeaderSize], data})
-	c.wio.Unlock()
-}
-
 // An InitRequest is the first request sent on a FUSE file system.
 type InitRequest struct {
 	Header `json:"-"`
