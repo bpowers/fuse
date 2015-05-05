@@ -69,6 +69,8 @@ type getxattrIn struct {
 	Padding  uint32
 }
 
+const getxattrInSize = getxattrInCommonSize + 4 + 4
+
 func (g *getxattrIn) position() uint32 {
 	return g.Position
 }
@@ -84,3 +86,5 @@ type setxattrIn struct {
 func (s *setxattrIn) position() uint32 {
 	return s.Position
 }
+
+const setxattrInSize = setxattrInCommonSize + 4 + 4
